@@ -15,9 +15,11 @@ from rich.console import Console
 
 from . import __version__
 from .agent import Agent
-from .config import ClydeConfig, ProviderConfig
+from .api import create_client
+from .config import ClydeConfig
 from .memory.store import MemoryStore
 from .models import Provider, StopReason
+from .plugins import PluginManager
 from .render import Renderer
 from .session import SessionStore
 
@@ -57,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-stream", action="store_true", help="Disable streaming")
     parser.add_argument("--auto-tools", action="store_true",
                         help="Auto-approve all tool executions")
+    parser.add_argument("--resume", type=str, metavar="SESSION_ID",
+                        help="Resume a previous session (use 'latest' for most recent)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
     parser.add_argument("prompt", nargs="*", help="Initial prompt (non-interactive mode)")
 
@@ -92,10 +96,18 @@ def _run_repl(args: argparse.Namespace):
     # Create agent with renderer as event handler
     agent = Agent(config=config, on_event=renderer.on_event)
 
+    # Load plugins (MCP servers + Python plugins)
+    plugin_manager = PluginManager()
+    _load_plugins(config, agent, plugin_manager, renderer)
+
     # Load memory into system prompt
     memory_entries = memory_store.get_context_entries()
     if memory_entries:
         agent.load_memory(memory_entries)
+
+    # Handle --resume
+    if args.resume:
+        _handle_resume(args.resume, agent, session_store, renderer)
 
     # Non-interactive mode: single prompt
     if args.prompt:
@@ -104,8 +116,7 @@ def _run_repl(args: argparse.Namespace):
         if not config.agent.stream:
             renderer.render_turn_result(result)
         renderer.render_usage(result)
-        if config.session.auto_save:
-            session_store.save(agent.session_id, agent.get_session_data())
+        _save_session(agent, session_store, config)
         return
 
     # Interactive REPL
@@ -115,6 +126,8 @@ def _run_repl(args: argparse.Namespace):
     renderer.print_info(f"  Provider: {provider_info}")
     renderer.print_info(f"  Tools: {len(agent.registry)} available")
     renderer.print_info(f"  Permissions: {config.agent.tool_permission_mode} mode")
+    if args.resume:
+        renderer.print_info(f"  Resumed: {agent.session_id} ({agent.turn_count} turns)")
     console.print()
 
     try:
@@ -130,7 +143,9 @@ def _run_repl(args: argparse.Namespace):
 
             # Handle slash commands
             if user_input.startswith("/"):
-                handled = _handle_command(user_input, agent, renderer, session_store, memory_store)
+                handled = _handle_command(
+                    user_input, agent, renderer, session_store, memory_store, plugin_manager,
+                )
                 if handled == "exit":
                     break
                 if handled:
@@ -152,9 +167,77 @@ def _run_repl(args: argparse.Namespace):
 
     finally:
         # Save session on exit
-        if config.session.auto_save:
-            session_store.save(agent.session_id, agent.get_session_data())
-            renderer.print_info(f"  Session saved: {agent.session_id}")
+        _save_session(agent, session_store, config)
+        renderer.print_info(f"  Session saved: {agent.session_id}")
+        plugin_manager.shutdown()
+
+
+def _save_session(agent: Agent, store: SessionStore, config: ClydeConfig) -> None:
+    """Save session with full message history for resume capability."""
+    if config.session.auto_save:
+        store.save_full(
+            agent.session_id,
+            agent.history.get_messages(),
+            agent.get_session_data(),
+        )
+
+
+def _handle_resume(
+    session_arg: str,
+    agent: Agent,
+    store: SessionStore,
+    renderer: Renderer,
+) -> None:
+    """Resume a previous session."""
+    if session_arg == "latest":
+        session_id = store.get_latest_session_id()
+        if not session_id:
+            renderer.print_error("No sessions found to resume.")
+            return
+    else:
+        session_id = session_arg
+
+    messages = store.load_messages(session_id)
+    if messages is None:
+        renderer.print_error(f"Could not load session '{session_id}' (missing or no full history).")
+        return
+
+    agent.resume_session(session_id, messages)
+    renderer.print_info(f"  Resumed session: {session_id} ({len(messages)} messages, {agent.turn_count} turns)")
+
+
+def _load_plugins(
+    config: ClydeConfig,
+    agent: Agent,
+    plugin_manager: PluginManager,
+    renderer: Renderer,
+) -> None:
+    """Load MCP servers and Python plugins into the agent's registry."""
+    count = 0
+
+    # Load MCP servers from config
+    config_path = Path("clyde.json")
+    if config_path.exists():
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            mcp_configs_raw = raw.get("mcp_servers", [])
+            if mcp_configs_raw:
+                mcp_configs = PluginManager.parse_mcp_config(mcp_configs_raw)
+                for tool in plugin_manager.load_mcp_servers(mcp_configs):
+                    agent.registry.register(tool)
+                    count += 1
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            renderer.print_error(f"Failed to load MCP config: {e}")
+
+    # Load Python plugins
+    plugin_dirs = [Path(".clyde_plugins")]
+    for tool in plugin_manager.load_plugins(plugin_dirs):
+        agent.registry.register(tool)
+        count += 1
+
+    if count > 0:
+        renderer.print_info(f"  Plugins: {count} external tool(s) loaded")
+        agent.invalidate_system_prompt()
 
 
 def _get_input(console: Console) -> str:
@@ -181,6 +264,7 @@ def _handle_command(
     renderer: Renderer,
     session_store: SessionStore,
     memory_store: MemoryStore,
+    plugin_manager: PluginManager,
 ) -> str | bool:
     """Handle slash commands. Returns 'exit' to quit, True if handled, False if not."""
     parts = cmd.strip().split(maxsplit=1)
@@ -193,18 +277,20 @@ def _handle_command(
     if command == "/help":
         renderer.print_info(
             "Commands:\n"
-            "  /help          Show this help\n"
-            "  /exit           Exit Clyde\n"
-            "  /reset          Reset conversation\n"
-            "  /compact        Compact conversation history\n"
-            "  /history        Show conversation summary\n"
-            "  /sessions       List saved sessions\n"
-            "  /memory         Show memory entries\n"
-            "  /tools          List available tools\n"
-            "  /model <name>   Switch model\n"
-            "  /provider <p>   Switch provider\n"
-            "  /usage          Show token usage\n"
-            "  /config         Show current config\n"
+            "  /help              Show this help\n"
+            "  /exit              Exit Clyde\n"
+            "  /reset             Reset conversation\n"
+            "  /resume [id]       Resume a session (default: latest)\n"
+            "  /compact           Compact conversation history\n"
+            "  /history           Show conversation summary\n"
+            "  /sessions          List saved sessions\n"
+            "  /memory            Show memory entries\n"
+            "  /tools             List available tools\n"
+            "  /model <name>      Switch model\n"
+            "  /provider <name>   Switch provider\n"
+            "  /structured <msg>  Force JSON structured output\n"
+            "  /usage             Show token usage\n"
+            "  /config            Show current config\n"
         )
         return True
 
@@ -213,12 +299,14 @@ def _handle_command(
         renderer.print_info("Conversation reset.")
         return True
 
+    if command == "/resume":
+        session_id = arg.strip() if arg.strip() else "latest"
+        _handle_resume(session_id, agent, session_store, renderer)
+        return True
+
     if command == "/compact":
-        summary = agent.history.compact()
-        if summary:
-            renderer.print_info(f"Compacted. Summary: {len(summary)} chars")
-        else:
-            renderer.print_info("Nothing to compact.")
+        agent._smart_compact()
+        renderer.print_info("Compaction complete.")
         return True
 
     if command == "/history":
@@ -234,7 +322,9 @@ def _handle_command(
         if not sessions:
             renderer.print_info("No saved sessions.")
         for s in sessions:
-            renderer.print_info(f"  {s['session_id']} ({s['turn_count']} turns)")
+            model = s.get("model", "")
+            model_str = f" [{model}]" if model else ""
+            renderer.print_info(f"  {s['session_id']} ({s['turn_count']} turns){model_str}")
         return True
 
     if command == "/memory":
@@ -252,24 +342,26 @@ def _handle_command(
         return True
 
     if command == "/model" and arg:
-        agent.config.provider.model = arg
-        agent.client = __import__("clyde.api", fromlist=["create_client"]).create_client(
-            agent.config.provider
-        )
-        agent.invalidate_system_prompt()
+        agent.switch_provider(model=arg)
         renderer.print_info(f"Model switched to: {arg}")
         return True
 
     if command == "/provider" and arg:
         try:
-            agent.config.provider.provider = Provider(arg)
-            agent.client = __import__("clyde.api", fromlist=["create_client"]).create_client(
-                agent.config.provider
-            )
-            agent.invalidate_system_prompt()
+            agent.switch_provider(provider_name=arg)
             renderer.print_info(f"Provider switched to: {arg}")
         except ValueError:
-            renderer.print_error(f"Unknown provider: {arg}")
+            renderer.print_error(f"Unknown provider: {arg}. Options: anthropic, openai, ollama, custom")
+        return True
+
+    if command == "/structured" and arg:
+        # Force structured JSON output for the prompt
+        schema = {"type": "object"}  # Generic schema — model decides structure
+        result = agent.submit_structured(arg, schema)
+        if result is not None:
+            renderer.print_info(json.dumps(result, indent=2))
+        else:
+            renderer.print_error("Failed to get structured output.")
         return True
 
     if command == "/usage":
@@ -330,6 +422,18 @@ def _init_project(args: argparse.Namespace):
             encoding="utf-8",
         )
         print(f"Created {clyde_md}")
+
+    # Create plugins directory
+    plugins_dir = Path(".clyde_plugins")
+    if not plugins_dir.exists():
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        (plugins_dir / "README.md").write_text(
+            "# Clyde Plugins\n\n"
+            "Drop Python files here that define classes inheriting from `BaseTool`.\n"
+            "They'll be auto-discovered and loaded at startup.\n",
+            encoding="utf-8",
+        )
+        print(f"Created {plugins_dir}/")
 
 
 def _list_sessions(args: argparse.Namespace):

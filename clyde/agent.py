@@ -16,6 +16,7 @@ Implements the full 11-step pipeline:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -108,6 +109,31 @@ class Agent:
         """Load memory entries for the system prompt."""
         self._memory_entries = entries
         self.invalidate_system_prompt()
+
+    def switch_provider(self, provider_name: str | None = None, model: str | None = None) -> None:
+        """Switch provider and/or model, rebuilding the API client."""
+        from .models import Provider as ProviderEnum
+        if provider_name:
+            self.config.provider.provider = ProviderEnum(provider_name)
+        if model:
+            self.config.provider.model = model
+        self.client = create_client(self.config.provider)
+        self.invalidate_system_prompt()
+
+    # -----------------------------------------------------------------------
+    # Session resume
+    # -----------------------------------------------------------------------
+
+    def resume_session(self, session_id: str, messages: list[Message]) -> None:
+        """Resume a previous session by restoring its history."""
+        self.session_id = session_id
+        self.history.clear()
+        for msg in messages:
+            self.history.append(msg)
+        # Count existing user messages as turns
+        self.turn_count = sum(1 for m in messages if m.role == Role.USER)
+        self.invalidate_system_prompt()
+        logger.info(f"Resumed session {session_id} with {len(messages)} messages")
 
     # -----------------------------------------------------------------------
     # The Agent Loop
@@ -205,6 +231,59 @@ class Agent:
             duration_ms=elapsed,
         )
 
+    # -----------------------------------------------------------------------
+    # Structured output mode
+    # -----------------------------------------------------------------------
+
+    def submit_structured(
+        self,
+        user_input: str,
+        schema: dict[str, Any],
+        retry_limit: int = 2,
+    ) -> dict[str, Any] | None:
+        """Submit and force the response into a JSON schema.
+
+        Instructs the model to respond with JSON matching the given schema.
+        Retries on parse failure up to retry_limit times.
+        """
+        structured_instruction = (
+            "You MUST respond with valid JSON only. No markdown, no explanation, no code fences.\n"
+            f"Your response must conform to this JSON schema:\n{json.dumps(schema, indent=2)}"
+        )
+        augmented_input = f"{user_input}\n\n{structured_instruction}"
+
+        for attempt in range(retry_limit + 1):
+            result = self.submit(augmented_input)
+            text = result.message.text.strip()
+
+            # Strip common wrapping
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+
+            try:
+                parsed = json.loads(text)
+                return parsed
+            except json.JSONDecodeError as e:
+                if attempt < retry_limit:
+                    logger.warning(f"Structured output parse failed (attempt {attempt + 1}): {e}")
+                    augmented_input = (
+                        f"Your previous response was not valid JSON: {e}\n"
+                        f"Please try again. Respond with ONLY valid JSON matching this schema:\n"
+                        f"{json.dumps(schema, indent=2)}"
+                    )
+                else:
+                    logger.error(f"Structured output failed after {retry_limit + 1} attempts")
+                    return None
+
+    # -----------------------------------------------------------------------
+    # API calls
+    # -----------------------------------------------------------------------
+
     def _call_api(self, system: str) -> tuple[list[ContentBlock], Usage, StopReason]:
         """Call the API (streaming or non-streaming) and return results."""
         messages = self.history.get_messages()
@@ -221,7 +300,11 @@ class Agent:
         messages: list[Message],
         tools: list[Any],
     ) -> tuple[list[ContentBlock], Usage, StopReason]:
-        """Stream from API, emitting events and collecting the result."""
+        """Stream from API, emitting events and collecting the result.
+
+        Accumulates content blocks directly from events rather than
+        relying on generator return values (avoids StopIteration anti-pattern).
+        """
         gen = self.client.stream(
             system=system,
             messages=messages,
@@ -229,37 +312,139 @@ class Agent:
             session_id=self.session_id,
         )
 
-        # Consume the generator, forwarding events
-        content_blocks = []
+        content_blocks: list[ContentBlock] = []
         usage = Usage()
         stop_reason = StopReason.END_TURN
+
+        # Accumulate from events directly
+        current_text = ""
+        tool_blocks: dict[str, dict] = {}  # id -> {name, input_json}
 
         try:
             while True:
                 event = next(gen)
                 self._on_event(event)
+
+                # Build content blocks from events (no reliance on generator return)
+                if event.type == "text_delta":
+                    current_text += event.data.get("text", "")
+                elif event.type == "tool_use":
+                    # Flush any accumulated text
+                    if current_text:
+                        content_blocks.append(TextBlock(text=current_text))
+                        current_text = ""
+                    tool_id = event.data.get("id", "")
+                    tool_blocks[tool_id] = {
+                        "name": event.data.get("name", ""),
+                        "input_json": "",
+                    }
+                elif event.type == "message_stop":
+                    stop_data = event.data
+                    sr = stop_data.get("stop_reason", "end_turn")
+                    stop_reason = StopReason(sr) if sr in StopReason.__members__.values() else StopReason.END_TURN
+                    usage.input_tokens = stop_data.get("input_tokens", 0)
+                    usage.output_tokens = stop_data.get("output_tokens", 0)
+
         except StopIteration as e:
-            # Generator returns (content_blocks, usage, stop_reason)
-            if e.value:
+            # Also accept generator return value if provided (backwards compat)
+            if e.value and isinstance(e.value, tuple) and len(e.value) == 3:
                 content_blocks, usage, stop_reason = e.value
+                return content_blocks, usage, stop_reason
+
+        # Flush remaining text
+        if current_text:
+            content_blocks.append(TextBlock(text=current_text))
 
         return content_blocks, usage, stop_reason
 
     # -----------------------------------------------------------------------
-    # Step 10: Post-sampling hooks
+    # Step 10: Post-sampling hooks — LLM-powered compaction
     # -----------------------------------------------------------------------
 
     def _run_hooks(self) -> None:
-        """Run post-sampling hooks: auto-compact, memory extraction."""
-        # Auto-compact if conversation is getting long
+        """Run post-sampling hooks: LLM-powered compact, memory extraction."""
         if (
             self.config.agent.auto_compact
             and self.history.length > self.config.agent.compact_after
         ):
-            summary = self.history.compact(keep_last=self.config.agent.compact_after // 2)
-            if summary:
-                logger.info(f"Auto-compacted conversation (kept last {self.config.agent.compact_after // 2} messages)")
-                self._on_event(StreamEvent("compact", {"summary_length": len(summary)}))
+            self._smart_compact()
+
+    def _smart_compact(self) -> None:
+        """LLM-powered conversation compaction.
+
+        Uses the model to intelligently summarize older messages,
+        preserving key decisions, tool results, and context rather
+        than just truncating text.
+        """
+        keep_last = max(6, self.config.agent.compact_after // 3)
+        if self.history.length <= keep_last:
+            return
+
+        to_summarize = self.history.messages[:-keep_last]
+
+        # Build a summary prompt from old messages
+        summary_parts = []
+        for msg in to_summarize:
+            role = msg.role.value
+            text = msg.text[:500] if msg.text else ""
+            tools = msg.tool_uses
+            results = msg.tool_results
+            if tools:
+                tool_names = ", ".join(t.name for t in tools)
+                summary_parts.append(f"[{role}] called tools: {tool_names}")
+            elif results:
+                for r in results:
+                    preview = r.content[:200]
+                    err = " (ERROR)" if r.is_error else ""
+                    summary_parts.append(f"[tool_result{err}] {preview}")
+            elif text:
+                summary_parts.append(f"[{role}] {text}")
+
+        old_text = "\n".join(summary_parts)
+
+        # Ask the model to summarize
+        compact_prompt = (
+            "Summarize this earlier conversation concisely. Preserve:\n"
+            "- Key decisions and conclusions\n"
+            "- Important tool results and file paths\n"
+            "- User preferences and corrections\n"
+            "- Any unresolved tasks\n"
+            "Be brief but complete. Do not lose critical context.\n\n"
+            f"Conversation to summarize:\n{old_text}"
+        )
+
+        try:
+            # Use a non-streaming, tool-free call for compaction
+            from .message import create_user_message as _cum
+            compact_messages = [_cum(compact_prompt)]
+            blocks, compact_usage, _ = self.client.complete(
+                system="You are a conversation summarizer. Be concise and preserve key details.",
+                messages=compact_messages,
+                tools=None,
+            )
+            summary_text = "".join(b.text for b in blocks if isinstance(b, TextBlock))
+
+            if summary_text:
+                kept = self.history.messages[-keep_last:]
+                summary_msg = Message(
+                    role=Role.USER,
+                    content=[TextBlock(
+                        text=f"[Conversation compacted by Clyde]\n{summary_text}"
+                    )],
+                )
+                self.history.messages = [summary_msg] + kept
+                self.history.add_usage(compact_usage)
+                logger.info(f"Smart-compacted: {len(to_summarize)} messages → summary ({len(summary_text)} chars)")
+                self._on_event(StreamEvent("compact", {
+                    "summary_length": len(summary_text),
+                    "messages_compacted": len(to_summarize),
+                    "method": "llm",
+                }))
+        except Exception as e:
+            # Fall back to dumb compaction on failure
+            logger.warning(f"LLM compaction failed, falling back to simple: {e}")
+            self.history.compact(keep_last=keep_last)
+            self._on_event(StreamEvent("compact", {"method": "simple", "error": str(e)}))
 
     # -----------------------------------------------------------------------
     # Session management
@@ -270,6 +455,8 @@ class Agent:
         return {
             "session_id": self.session_id,
             "turn_count": self.turn_count,
+            "model": self.config.provider.model,
+            "provider": self.config.provider.provider.value,
             "history": self.history.replay(),
             "usage": {
                 "input_tokens": self.history.usage.input_tokens,
