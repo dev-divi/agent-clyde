@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"Clyde v{__version__}")
     parser.add_argument("--config", type=str, default="clyde.json", help="Config file path")
     parser.add_argument("--model", type=str, help="Override model name")
-    parser.add_argument("--provider", type=str, choices=["anthropic", "openai", "ollama", "custom"],
+    parser.add_argument("--provider", type=str, choices=["anthropic", "openai", "ollama", "gemini", "custom"],
                         help="Override provider")
     parser.add_argument("--base-url", type=str, help="Override API base URL")
     parser.add_argument("--no-stream", action="store_true", help="Disable streaming")
@@ -354,7 +354,7 @@ def _handle_command(
             agent.switch_provider(provider_name=arg)
             renderer.print_info(f"Provider switched to: {arg}")
         except ValueError:
-            renderer.print_error(f"Unknown provider: {arg}. Options: anthropic, openai, ollama, custom")
+            renderer.print_error(f"Unknown provider: {arg}. Options: anthropic, openai, ollama, gemini, custom")
         return True
 
     if command == "/structured" and arg:

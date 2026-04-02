@@ -1,0 +1,21 @@
+{
+  "provider": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "temperature": 0.7,
+    "max_tokens": 8192
+  },
+  "agent": {
+    "max_turns": 25,
+    "compact_after": 40,
+    "auto_compact": true,
+    "stream": true,
+    "tool_permission_mode": "prompt"
+  },
+  "session": {
+    "sessions_dir": ".clyde_sessions",
+    "memory_dir": ".clyde_memory",
+    "auto_save": true
+  },
+  "identity_file": "CLYDE.md"
+}

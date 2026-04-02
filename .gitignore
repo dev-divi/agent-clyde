@@ -14,3 +14,4 @@ venv/
 *.log
 .ruff_cache/
 .pytest_cache/
+clyde.json

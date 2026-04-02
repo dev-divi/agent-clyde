@@ -1,8 +1,19 @@
 # Clyde
 
+<p align="center">
+  <img src="screenshots/clyde-mascot.png" alt="Clyde" width="200">
+</p>
+
 Lightweight, provider-agnostic AI agent with a full tool system.
 
 Built as future-proofing infrastructure — your operation never depends on a single company. Clyde implements the same 11-step agent loop architecture used by production AI coding agents, but runs against any LLM backend.
+
+## Demo
+
+![Clyde Launch](screenshots/clyde-launch.png)
+![Clyde Research](screenshots/clyde-research.png)
+![Clyde Plan](screenshots/clyde-plan.png)
+![Clyde File Read](screenshots/clyde-file-read.png)
 
 ## Architecture
 
@@ -16,9 +27,10 @@ User Input → Message Creation → History Append → System Prompt Assembly
 
 | Provider | Model Examples | Config |
 |----------|---------------|--------|
+| **Gemini** | gemini-2.0-flash, gemini-2.5-pro | `GEMINI_API_KEY` (free tier available) |
 | Anthropic | claude-sonnet-4-20250514, claude-opus-4-20250514 | `ANTHROPIC_API_KEY` |
 | OpenAI | gpt-4o, gpt-4-turbo | `OPENAI_API_KEY` |
-| Ollama | llama3, mistral, codellama | Local, no key needed |
+| Ollama | llama3, qwen2.5-coder, mistral | Local, no key needed |
 | Custom | Any OpenAI-compatible endpoint | `CLYDE_API_KEY` + `CLYDE_BASE_URL` |
 
 ## Quick Start
@@ -29,6 +41,10 @@ pip install -e .
 
 # Initialize config
 clyde init
+
+# Run with Gemini (free)
+export GEMINI_API_KEY=your-key    # Get one free at https://aistudio.google.com/apikey
+clyde --provider gemini --model gemini-2.0-flash
 
 # Run with Anthropic (default)
 export ANTHROPIC_API_KEY=sk-...
@@ -48,7 +64,9 @@ clyde "Find all TODO comments in this project"
 clyde --auto-tools
 ```
 
-## Built-in Tools
+> **Windows users:** Use `setx GEMINI_API_KEY "your-key"` instead of `export`, then restart your terminal.
+
+## Built-in Tools (9)
 
 | Tool | Category | Description |
 |------|----------|-------------|
@@ -59,22 +77,28 @@ clyde --auto-tools
 | `glob` | search | Find files by pattern |
 | `grep` | search | Search file contents with regex |
 | `web_fetch` | web | Fetch content from URLs |
+| `web_search` | web | Search the web via DuckDuckGo (no API key) |
+| `todo` | planning | Task tracking for multi-step work |
 
 ## Slash Commands
 
 ```
-/help          Show available commands
-/exit          Exit Clyde
-/reset         Reset conversation
-/compact       Compact conversation history
-/history       Show conversation summary
-/sessions      List saved sessions
-/memory        Show memory entries
-/tools         List available tools
-/model <name>  Switch model mid-session
-/provider <p>  Switch provider mid-session
-/usage         Show token usage
-/config        Show current config
+/help              Show available commands
+/exit              Exit Clyde
+/reset             Reset conversation
+/compact           Compact conversation history
+/history           Show conversation summary
+/sessions          List saved sessions
+/memory            Show memory entries
+/tools             List available tools
+/model <name>      Switch model mid-session
+/provider <name>   Switch provider mid-session
+/structured <msg>  Force JSON structured output
+/usage             Show token usage
+/config            Show current config
+/todo              Show current task list
+/diff              Show session activity (files touched, commands run)
+/export [path]     Export conversation to JSON file
 ```
 
 ## Configuration
@@ -84,10 +108,10 @@ Create `clyde.json` in your project root (or run `clyde init`):
 ```json
 {
   "provider": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
+    "provider": "gemini",
+    "model": "gemini-2.0-flash",
     "temperature": 0.7,
-    "max_tokens": 4096
+    "max_tokens": 8192
   },
   "agent": {
     "max_turns": 25,
@@ -146,5 +170,7 @@ clyde/
     ├── grep_tool.py      # Content search
     ├── permissions.py    # Permission system
     ├── registry.py       # Tool registry
-    └── web_fetch.py      # URL fetching
+    ├── web_fetch.py      # URL fetching
+    ├── web_search.py     # DuckDuckGo search
+    └── todo.py           # Task tracking
 ```

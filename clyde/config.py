@@ -40,6 +40,7 @@ class ProviderConfig:
             Provider.ANTHROPIC: "ANTHROPIC_API_KEY",
             Provider.OPENAI: "OPENAI_API_KEY",
             Provider.OLLAMA: "",  # Ollama doesn't need a key
+            Provider.GEMINI: "GEMINI_API_KEY",
             Provider.CUSTOM: "CLYDE_API_KEY",
         }
         env_var = env_map.get(self.provider, "")
@@ -53,6 +54,7 @@ class ProviderConfig:
             Provider.ANTHROPIC: "https://api.anthropic.com",
             Provider.OPENAI: "https://api.openai.com/v1",
             Provider.OLLAMA: "http://localhost:11434/v1",
+            Provider.GEMINI: "https://generativelanguage.googleapis.com/v1beta/openai/",
             Provider.CUSTOM: os.environ.get("CLYDE_BASE_URL", "http://localhost:8080/v1"),
         }
         return url_map.get(self.provider, "")

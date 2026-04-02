@@ -29,6 +29,7 @@ class Provider(str, Enum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     OLLAMA = "ollama"
+    GEMINI = "gemini"
     CUSTOM = "custom"  # Any OpenAI-compatible endpoint
 
 
