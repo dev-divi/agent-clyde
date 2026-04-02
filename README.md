@@ -1,8 +1,4 @@
-# Clyde
-
-<p align="center">
-  <img src="screenshots/clyde-mascot.png" alt="Clyde" width="200">
-</p>
+# <img src="screenshots/clyde-mascot.png" alt="Clyde" width="60" style="vertical-align: middle;"> Clyde
 
 Lightweight, provider-agnostic AI agent with a full tool system.
 
