@@ -139,7 +139,7 @@ def parse_openai_response(choice: dict) -> list[ContentBlock]:
     if msg.get("content"):
         result.append(TextBlock(text=msg["content"]))
 
-    for tc in msg.get("tool_calls", []):
+    for tc in (msg.get("tool_calls") or []):
         import json
         try:
             args = json.loads(tc["function"]["arguments"])

@@ -336,6 +336,14 @@ class OpenAICompatibleClient(APIClient):
                 args = {}
             content_blocks.append(ToolUseBlock(id=tc["id"], name=tc["name"], input=args))
 
+        # Fallback: extract tool calls from text if model didn't use native function calling
+        # (common with Ollama/local models that output JSON as text)
+        if tools and not tool_calls_acc and accumulated_text:
+            extracted = _extract_tool_calls_from_text(accumulated_text, tools)
+            if extracted:
+                content_blocks = extracted
+                stop_reason = StopReason.TOOL_USE
+
         yield event_message_stop(stop_reason, usage)
         return content_blocks, usage, stop_reason
 
@@ -388,6 +396,15 @@ class OpenAICompatibleClient(APIClient):
         else:
             stop_reason = StopReason.END_TURN
 
+        # Fallback: extract tool calls from text for models that don't use native function calling
+        if tools and stop_reason == StopReason.END_TURN:
+            text_content = "".join(b.text for b in content_blocks if isinstance(b, TextBlock))
+            if text_content:
+                extracted = _extract_tool_calls_from_text(text_content, tools)
+                if extracted:
+                    content_blocks = extracted
+                    stop_reason = StopReason.TOOL_USE
+
         return content_blocks, usage, stop_reason
 
 
@@ -401,3 +418,105 @@ def create_client(config: ProviderConfig) -> APIClient:
         return AnthropicClient(config)
     # OpenAI, Ollama, and Custom all use OpenAI-compatible API
     return OpenAICompatibleClient(config)
+
+
+# ---------------------------------------------------------------------------
+# Tool-call extraction fallback for local models
+# ---------------------------------------------------------------------------
+
+def _extract_tool_calls_from_text(
+    text: str, tools: list[ToolDefinition],
+) -> list[ContentBlock] | None:
+    """Extract tool calls from model text output.
+
+    Many local models (Ollama, LM Studio) output tool calls as JSON text
+    instead of using the native function-calling API. This parser detects
+    common patterns and converts them to proper ToolUseBlock objects.
+
+    Patterns detected:
+      - {"name": "tool_name", "arguments": {...}}
+      - {"name": "tool_name", "parameters": {...}}
+      - {"tool": "tool_name", "input": {...}}
+    """
+    import re
+    import uuid
+
+    tool_names = {t.name for t in tools}
+    # Also match by description prefix (some models use the description as name)
+    tool_name_map = {t.name: t.name for t in tools}
+    for t in tools:
+        # Map lowercased and variants
+        tool_name_map[t.name.lower()] = t.name
+        tool_name_map[t.description.split(".")[0].strip().lower()] = t.name
+
+    # Try to find JSON objects in the text
+    text_stripped = text.strip()
+
+    # Strip markdown code fences
+    if text_stripped.startswith("```"):
+        lines = text_stripped.splitlines()
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        text_stripped = "\n".join(lines).strip()
+
+    # Try parsing as a single JSON object
+    candidates = []
+    try:
+        obj = json.loads(text_stripped)
+        if isinstance(obj, dict):
+            candidates.append(obj)
+        elif isinstance(obj, list):
+            candidates.extend(o for o in obj if isinstance(o, dict))
+    except json.JSONDecodeError:
+        # Try to find JSON objects embedded in text
+        for match in re.finditer(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text_stripped):
+            try:
+                obj = json.loads(match.group())
+                if isinstance(obj, dict):
+                    candidates.append(obj)
+            except json.JSONDecodeError:
+                continue
+
+    if not candidates:
+        return None
+
+    blocks: list[ContentBlock] = []
+    for obj in candidates:
+        # Extract tool name from various keys
+        name = (
+            obj.get("name")
+            or obj.get("tool")
+            or obj.get("function")
+            or ""
+        )
+        if isinstance(name, dict):
+            name = name.get("name", "")
+
+        # Normalize name
+        resolved_name = tool_name_map.get(name, tool_name_map.get(name.lower(), ""))
+        if not resolved_name:
+            continue
+
+        # Extract arguments from various keys
+        args = (
+            obj.get("arguments")
+            or obj.get("parameters")
+            or obj.get("input")
+            or obj.get("args")
+            or {}
+        )
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+
+        if not isinstance(args, dict):
+            continue
+
+        blocks.append(ToolUseBlock(
+            id=f"extracted_{uuid.uuid4().hex[:8]}",
+            name=resolved_name,
+            input=args,
+        ))
+
+    return blocks if blocks else None
