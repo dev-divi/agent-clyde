@@ -16,11 +16,13 @@ User Input → Message Creation → History Append → System Prompt Assembly
 
 | Provider | Model Examples | Config |
 |----------|---------------|--------|
-| **Gemini** | gemini-2.0-flash, gemini-2.5-pro | `GEMINI_API_KEY` (free tier available) |
-| Anthropic | claude-sonnet-4-20250514, claude-opus-4-20250514 | `ANTHROPIC_API_KEY` |
-| OpenAI | gpt-4o, gpt-4-turbo | `OPENAI_API_KEY` |
+| **Anthropic** | claude-sonnet-4-20250514, claude-opus-4-20250514 | `ANTHROPIC_API_KEY` |
+| **OpenAI** | gpt-4o, gpt-4-turbo | `OPENAI_API_KEY` |
+| Gemini | gemini-2.5-flash, gemini-2.5-pro | `GEMINI_API_KEY` (free tier) |
 | Ollama | llama3, qwen2.5-coder, mistral | Local, no key needed |
 | Custom | Any OpenAI-compatible endpoint | `CLYDE_API_KEY` + `CLYDE_BASE_URL` |
+
+> For full agent capabilities (multi-step planning, tool chaining), use Claude or GPT-4o. Free models like Gemini 2.5 Flash can handle simple tasks but can't handle complex workflows — multi-step work and tool chaining.
 
 ## Quick Start
 
