@@ -170,3 +170,13 @@ clyde/
     ├── web_search.py     # DuckDuckGo search
     └── todo.py           # Task tracking
 ```
+
+## FAQ
+
+**How does Clyde compare to OpenClaw / other AI agent frameworks?**
+
+OpenClaw is a Swiss Army knife factory. Clyde is a really good pocket knife.
+
+OpenClaw ships 26+ tools, 53 skills, 23 messaging platforms, browser control, voice, and device integration. It's an entire personal assistant platform. Clyde gives you a clean 11-step agent loop, 9 sharp tools, and the freedom to point it at any LLM backend — Gemini (free), Ollama (local), Anthropic, OpenAI, or any compatible endpoint.
+
+No dependency hell, Docker, database, or message broker.
