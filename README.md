@@ -127,7 +127,7 @@ Create `clyde.json` in your project root (or run `clyde init`):
 
 ## Project Identity
 
-Create a `CLYDE.md` file in your project root to give Clyde project-specific instructions. This works exactly like CLAUDE.md — it gets included in the system prompt.
+Create a `CLYDE.md` file in your project root to give Clyde project-specific instructions. This gets included in the system prompt.
 
 ## Memory System
 
@@ -176,7 +176,3 @@ clyde/
 **How does Clyde compare to OpenClaw / other AI agent frameworks?**
 
 OpenClaw is a Swiss Army knife factory. Clyde is a really good pocket knife.
-
-OpenClaw ships 26+ tools, 53 skills, 23 messaging platforms, browser control, voice, and device integration. It's an entire personal assistant platform. Clyde gives you a clean 11-step agent loop, 9 sharp tools, and the freedom to point it at any LLM backend — Gemini (free), Ollama (local), Anthropic, OpenAI, or any compatible endpoint.
-
-No dependency hell, Docker, database, or message broker.
