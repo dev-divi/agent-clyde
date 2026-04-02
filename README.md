@@ -178,3 +178,11 @@ clyde/
 **How does Clyde compare to OpenClaw / other AI agent frameworks?**
 
 OpenClaw is a Swiss Army knife factory. Clyde is a really good pocket knife.
+
+## Disclaimer
+
+Clyde executes shell commands and modifies files on your system. A weak model can and will run destructive commands it doesn't understand. Even strong models can cause damage. Always use permission mode (the default) and review tool calls before approving them.
+
+**Use at your own risk.** This software is provided as-is with no warranty. The authors are not responsible for any damage to your system, data loss, or unintended consequences.
+
+Do not use Clyde for illegal activities, to harm others, or to circumvent security systems. This tool is intended for legitimate development and automation work only.
