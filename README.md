@@ -22,7 +22,7 @@ User Input → Message Creation → History Append → System Prompt Assembly
 | Ollama | llama3, qwen2.5-coder, mistral | Local, no key needed |
 | Custom | Any OpenAI-compatible endpoint | `CLYDE_API_KEY` + `CLYDE_BASE_URL` |
 
-> For full agent capabilities (multi-step planning, tool chaining), use Claude or GPT-4o. Free models like Gemini 2.5 Flash can handle simple tasks but can't handle complex workflows — multi-step work and tool chaining.
+> For full agent capabilities (multi-step planning, tool chaining), use Claude or GPT-4o. Free models like Gemini 2.5 Flash can handle simple tasks but can't handle complex workflows.
 
 ## Quick Start
 
