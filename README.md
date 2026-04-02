@@ -4,13 +4,6 @@ Lightweight, provider-agnostic AI agent with a full tool system.
 
 Built as future-proofing infrastructure — your operation never depends on a single company. Clyde is a clean-room implementation inspired by a publicly documented architecture — the same 11-step agent loop used by production AI coding agents, but runs against any LLM backend.
 
-## Demo
-
-![Clyde Launch](screenshots/clyde-launch.png)
-![Clyde Research](screenshots/clyde-research.png)
-![Clyde Plan](screenshots/clyde-plan.png)
-![Clyde File Read](screenshots/clyde-file-read.png)
-
 ## Architecture
 
 ```
@@ -61,6 +54,13 @@ clyde --auto-tools
 ```
 
 > **Windows users:** Use `setx GEMINI_API_KEY "your-key"` instead of `export`, then restart your terminal.
+
+## Demo
+
+![Clyde Launch](screenshots/clyde-launch.png)
+![Clyde Research](screenshots/clyde-research.png)
+![Clyde Plan](screenshots/clyde-plan.png)
+![Clyde File Read](screenshots/clyde-file-read.png)
 
 ## Built-in Tools (9)
 
