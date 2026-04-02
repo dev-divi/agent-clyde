@@ -18,7 +18,7 @@ from .agent import Agent
 from .api import create_client
 from .config import ClydeConfig
 from .memory.store import MemoryStore
-from .models import Provider, StopReason
+from .models import Provider, StopReason, TextBlock, ToolResultBlock, ToolUseBlock
 from .plugins import PluginManager
 from .render import Renderer
 from .session import SessionStore
@@ -291,6 +291,9 @@ def _handle_command(
             "  /structured <msg>  Force JSON structured output\n"
             "  /usage             Show token usage\n"
             "  /config            Show current config\n"
+            "  /todo              Show current task list\n"
+            "  /diff              Show changes made this session\n"
+            "  /export [path]     Export conversation to JSON file\n"
         )
         return True
 
@@ -376,6 +379,69 @@ def _handle_command(
 
     if command == "/config":
         renderer.print_info(json.dumps(agent.config.to_dict(), indent=2))
+        return True
+
+    if command == "/todo":
+        from .tools.todo import get_todo_store
+        renderer.print_info(get_todo_store().render())
+        return True
+
+    if command == "/diff":
+        # Show tool-use activity from this session (files touched, commands run)
+        messages = agent.history.get_messages()
+        changes: list[str] = []
+        for msg in messages:
+            for block in msg.content:
+                if isinstance(block, ToolUseBlock):
+                    tool_name = block.name
+                    inp = block.input
+                    if tool_name in ("file_write", "file_edit"):
+                        path = inp.get("file_path", inp.get("path", "?"))
+                        changes.append(f"  ✏️  {tool_name}: {path}")
+                    elif tool_name == "bash":
+                        cmd_text = inp.get("command", "")[:80]
+                        changes.append(f"  ▶  bash: {cmd_text}")
+                    elif tool_name in ("file_read", "glob", "grep"):
+                        target = inp.get("file_path", inp.get("pattern", inp.get("path", "")))
+                        changes.append(f"  👁  {tool_name}: {target}")
+        if changes:
+            renderer.print_info(f"Session activity ({len(changes)} tool calls):\n" + "\n".join(changes))
+        else:
+            renderer.print_info("No tool activity in this session.")
+        return True
+
+    if command == "/export":
+        # Export conversation history to a JSON file
+        export_path = arg.strip() if arg.strip() else f"clyde_export_{agent.session_id}.json"
+        messages = agent.history.get_messages()
+        export_data = {
+            "session_id": agent.session_id,
+            "turn_count": agent.turn_count,
+            "model": agent.config.provider.model,
+            "provider": agent.config.provider.provider.value,
+            "messages": [],
+        }
+        for msg in messages:
+            entry: dict = {"role": msg.role.value, "content": []}
+            for block in msg.content:
+                if isinstance(block, TextBlock):
+                    entry["content"].append({"type": "text", "text": block.text})
+                elif isinstance(block, ToolUseBlock):
+                    entry["content"].append({
+                        "type": "tool_use", "name": block.name,
+                        "id": block.id, "input": block.input,
+                    })
+                elif isinstance(block, ToolResultBlock):
+                    entry["content"].append({
+                        "type": "tool_result", "tool_use_id": block.tool_use_id,
+                        "content": block.content,
+                    })
+            export_data["messages"].append(entry)
+        try:
+            Path(export_path).write_text(json.dumps(export_data, indent=2), encoding="utf-8")
+            renderer.print_info(f"Exported {len(messages)} messages to: {export_path}")
+        except OSError as e:
+            renderer.print_error(f"Export failed: {e}")
         return True
 
     renderer.print_info(f"Unknown command: {command}. Type /help for commands.")

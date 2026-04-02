@@ -156,7 +156,7 @@ def test_config_from_dict():
 def test_registry():
     from clyde.tools.defaults import create_default_registry
     reg = create_default_registry()
-    assert len(reg) == 7
+    assert len(reg) == 9
     assert reg.has("bash")
     assert reg.has("file_read")
     assert reg.get("bash") is not None
@@ -383,3 +383,101 @@ def test_plugin_loader_discovers_tool():
         assert len(tools) == 1
         assert tools[0].name == "hello"
         assert tools[0].execute(name="Tyler") == "Hello, Tyler!"
+
+
+# ---------------------------------------------------------------------------
+# Web Search tool
+# ---------------------------------------------------------------------------
+
+def test_web_search_tool_definition():
+    from clyde.tools.web_search import WebSearchTool
+    tool = WebSearchTool()
+    assert tool.name == "web_search"
+    assert tool.requires_permission is True
+    params = tool.get_parameters()
+    param_names = [p.name for p in params]
+    assert "query" in param_names
+    assert "max_results" in param_names
+
+
+def test_web_search_registered():
+    from clyde.tools.defaults import create_default_registry
+    reg = create_default_registry()
+    assert reg.has("web_search")
+
+
+# ---------------------------------------------------------------------------
+# Todo tool
+# ---------------------------------------------------------------------------
+
+def test_todo_add_and_list():
+    from clyde.tools.todo import TodoStore
+    store = TodoStore()
+    item = store.add("Test task")
+    assert item.id == 1
+    assert item.status == "pending"
+    rendered = store.render()
+    assert "Test task" in rendered
+    assert "pending" in rendered
+
+
+def test_todo_update_status():
+    from clyde.tools.todo import TodoStore
+    store = TodoStore()
+    store.add("Task A")
+    store.add("Task B")
+    result = store.update_status(1, "completed")
+    assert result is not None
+    assert result.status == "completed"
+    assert store.update_status(999, "completed") is None
+
+
+def test_todo_remove():
+    from clyde.tools.todo import TodoStore
+    store = TodoStore()
+    store.add("Remove me")
+    assert store.remove(1) is True
+    assert store.remove(1) is False  # already removed
+    assert store.render() == "No tasks."
+
+
+def test_todo_clear_completed():
+    from clyde.tools.todo import TodoStore
+    store = TodoStore()
+    store.add("Keep")
+    item = store.add("Done")
+    store.update_status(item.id, "completed")
+    cleared = store.clear_completed()
+    assert cleared == 1
+    assert len(store.items) == 1
+    assert store.items[0].content == "Keep"
+
+
+def test_todo_tool_execute():
+    from clyde.tools.todo import TodoWriteTool, _store, TodoStore
+    # Reset global store for clean test
+    _store.items.clear()
+    _store._next_id = 1
+    tool = TodoWriteTool()
+    # Add
+    result = tool.execute(action="add", content="Build feature")
+    assert "Build feature" in result
+    # List
+    result = tool.execute(action="list")
+    assert "Build feature" in result
+    # Update
+    result = tool.execute(action="update", id=1, status="completed")
+    assert "completed" in result
+    # Clear
+    result = tool.execute(action="clear")
+    assert "Cleared 1" in result
+    # Errors
+    assert "Error" in tool.execute(action="add")
+    assert "Error" in tool.execute(action="update")
+    assert "Error" in tool.execute(action="remove")
+
+
+def test_todo_registered():
+    from clyde.tools.defaults import create_default_registry
+    reg = create_default_registry()
+    assert reg.has("todo")

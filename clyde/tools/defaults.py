@@ -9,7 +9,9 @@ from .file_write import FileWriteTool
 from .glob_tool import GlobTool
 from .grep_tool import GrepTool
 from .registry import ToolRegistry
+from .todo import TodoWriteTool
 from .web_fetch import WebFetchTool
+from .web_search import WebSearchTool
 
 
 def create_default_registry() -> ToolRegistry:
@@ -22,4 +24,6 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GlobTool())
     registry.register(GrepTool())
     registry.register(WebFetchTool())
+    registry.register(WebSearchTool())
+    registry.register(TodoWriteTool())
     return registry
