@@ -2,7 +2,7 @@
 
 Lightweight, provider-agnostic AI agent with a full tool system.
 
-Built as future-proofing infrastructure — your operation never depends on a single company. Clyde implements the same 11-step agent loop architecture used by production AI coding agents, but runs against any LLM backend.
+Built as future-proofing infrastructure — your operation never depends on a single company. Clyde is a clean-room implementation inspired by a publicly documented architecture — the same 11-step agent loop used by production AI coding agents, but runs against any LLM backend.
 
 ## Demo
 
