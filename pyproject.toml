@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "choice-agent-clyde"
+version = "0.1.0"
+description = "Lightweight, provider-agnostic AI agent with full tool system"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Tyler Choice"}]
+
+dependencies = [
+    "anthropic>=0.39.0",
+    "openai>=1.50.0",
+    "httpx>=0.27.0",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.43",
+    "pyyaml>=6.0.1",
+    "tiktoken>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5.0"]
+
+[project.scripts]
+clyde = "clyde.main:main"
+
+[tool.setuptools.packages.find]
+include = ["clyde*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

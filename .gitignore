@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.env
+.venv/
+venv/
+.clyde_sessions/
+.clyde_memory/
+*.log
+.ruff_cache/
+.pytest_cache/
